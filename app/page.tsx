@@ -2,10 +2,65 @@
 import { useState, useEffect, useRef } from 'react';
 import { GoogleMap, LoadScript, Marker } from '@react-google-maps/api';
 import eventsData from './data.json';
+import Image from 'next/image';
 
 interface Event {
   [key: string]: string | string[];
 }
+
+// Move helper functions outside the component
+const expandDateRange = (dateRange: string): string[] => {
+  const [start, end] = dateRange.split('-').map(d => d.trim());
+  const [startMonth, startDay, startYear] = start.split(' ');
+  const [endMonth, endDay, endYear] = end ? end.split(' ') : [startMonth, startDay, startYear];
+  
+  const startDate = new Date(`${startMonth} ${startDay} ${startYear}`);
+  const endDate = new Date(`${endMonth} ${endDay} ${endYear}`);
+  
+  const dates: string[] = [];
+  const currentDate = new Date(startDate);
+  
+  while (currentDate <= endDate) {
+    dates.push(currentDate.toLocaleDateString('en-US', {
+      month: 'long',
+      day: 'numeric',
+      year: 'numeric'
+    }).toLowerCase());
+    currentDate.setDate(currentDate.getDate() + 1);
+  }
+  
+  return dates;
+};
+
+const processEventsData = (data: typeof eventsData) => {
+  const processedEvents: { [key: string]: { [key: string]: string | string[] } } = {};
+  
+  Object.entries(data).forEach(([dateKey, events]) => {
+    if (dateKey.includes('-')) {
+      // Handle date range
+      const expandedDates = expandDateRange(dateKey);
+      expandedDates.forEach(date => {
+        if (!processedEvents[date]) {
+          processedEvents[date] = {};
+        }
+        // Add all events from this range to each date
+        Object.entries(events).forEach(([event, details]) => {
+          processedEvents[date][event] = details;
+        });
+      });
+    } else {
+      // Handle single date
+      if (!processedEvents[dateKey]) {
+        processedEvents[dateKey] = {};
+      }
+      Object.entries(events).forEach(([event, details]) => {
+        processedEvents[dateKey][event] = details;
+      });
+    }
+  });
+  
+  return processedEvents;
+};
 
 export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string>('');
@@ -16,62 +71,7 @@ export default function Home() {
   const dateScrollRef = useRef<HTMLDivElement>(null);
   const [processedEventsData, setProcessedEventsData] = useState<{[key: string]: {[key: string]: string | string[]}}>({}); 
 
-  // Add these helper functions
-  const expandDateRange = (dateRange: string): string[] => {
-    const [start, end] = dateRange.split('-').map(d => d.trim());
-    const [startMonth, startDay, startYear] = start.split(' ');
-    const [endMonth, endDay, endYear] = end ? end.split(' ') : [startMonth, startDay, startYear];
-    
-    const startDate = new Date(`${startMonth} ${startDay} ${startYear}`);
-    const endDate = new Date(`${endMonth} ${endDay} ${endYear}`);
-    
-    const dates: string[] = [];
-    const currentDate = new Date(startDate);
-    
-    while (currentDate <= endDate) {
-      dates.push(currentDate.toLocaleDateString('en-US', {
-        month: 'long',
-        day: 'numeric',
-        year: 'numeric'
-      }).toLowerCase());
-      currentDate.setDate(currentDate.getDate() + 1);
-    }
-    
-    return dates;
-  };
-
-  // Add this new helper function to process all events by date
-  const processEventsData = () => {
-    const processedEvents: { [key: string]: { [key: string]: string | string[] } } = {};
-    
-    Object.entries(eventsData).forEach(([dateKey, events]) => {
-      if (dateKey.includes('-')) {
-        // Handle date range
-        const expandedDates = expandDateRange(dateKey);
-        expandedDates.forEach(date => {
-          if (!processedEvents[date]) {
-            processedEvents[date] = {};
-          }
-          // Add all events from this range to each date
-          Object.entries(events).forEach(([event, details]) => {
-            processedEvents[date][event] = details;
-          });
-        });
-      } else {
-        // Handle single date
-        if (!processedEvents[dateKey]) {
-          processedEvents[dateKey] = {};
-        }
-        Object.entries(events).forEach(([event, details]) => {
-          processedEvents[dateKey][event] = details;
-        });
-      }
-    });
-    
-    return processedEvents;
-  };
-
-  // Modified filter function to search across all dates when searching
+  // Modified filter function to handle type checking and validation
   const getFilteredEvents = () => {
     if (!searchQuery || !isSearching) {
       return selectedDate ? Object.entries(processedEventsData[selectedDate] || {}) : [];
@@ -80,19 +80,36 @@ export default function Home() {
     const allEvents: [string, string, string][] = [];
     Object.entries(processedEventsData).forEach(([date, events]) => {
       Object.entries(events).forEach(([event, details]) => {
+        // Convert details to string safely
+        const detailString = Array.isArray(details) 
+          ? details[0]?.toString() || ''
+          : details?.toString() || '';
+
         if (
           event.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          (details as string).toLowerCase().includes(searchQuery.toLowerCase())
+          detailString.toLowerCase().includes(searchQuery.toLowerCase())
         ) {
-          allEvents.push([event, details as string, date]);
+          allEvents.push([event, detailString, date]);
         }
       });
     });
     return allEvents;
   };
 
+  // Modified search handler with validation
   const handleSearch = () => {
-    setIsSearching(true);
+    if (searchQuery.trim()) {
+      setIsSearching(true);
+    }
+  };
+
+  // Modified search input handler with validation
+  const handleSearchInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value;
+    setSearchQuery(value);
+    if (!value.trim()) {
+      setIsSearching(false);
+    }
   };
 
   const clearSearch = () => {
@@ -205,58 +222,78 @@ export default function Home() {
     window.open(googleMapsUrl, '_blank');
   };
 
-  // Update useEffect to use processed events
+  // Split the initialization into two effects
   useEffect(() => {
-    const processed = processEventsData();
+    const processed = processEventsData(eventsData);
     setProcessedEventsData(processed);
-    
-    const today = new Date();
-    
-    const allDates = Object.keys(processed).sort((a, b) => 
-      new Date(a).getTime() - new Date(b).getTime()
-    );
-    
-    const todayOrNext = allDates.find(date => 
-      new Date(date).setHours(0,0,0,0) >= today.setHours(0,0,0,0)
-    ) || allDates[0];
-    
-    setSelectedDate(todayOrNext);
+  }, []);
 
-    // Center the selected date button
-    setTimeout(() => {
-      const selectedButton = document.querySelector(`[data-date="${todayOrNext}"]`);
-      if (selectedButton && dateScrollRef.current) {
-        const scrollContainer = dateScrollRef.current;
-        const buttonRect = (selectedButton as HTMLElement).getBoundingClientRect();
-        const containerRect = scrollContainer.getBoundingClientRect();
-        const scrollLeft = (selectedButton as HTMLElement).offsetLeft - (containerRect.width / 2) + (buttonRect.width / 2);
-        scrollContainer.scrollLeft = scrollLeft;
-      }
-    }, 100);
-  }, [processEventsData]);
+  useEffect(() => {
+    if (Object.keys(processedEventsData).length > 0 && !selectedDate) {
+      const today = new Date();
+      
+      const allDates = Object.keys(processedEventsData).sort((a, b) => 
+        new Date(a).getTime() - new Date(b).getTime()
+      );
+      
+      const todayOrNext = allDates.find(date => 
+        new Date(date).setHours(0,0,0,0) >= today.setHours(0,0,0,0)
+      ) || allDates[0];
+      
+      setSelectedDate(todayOrNext);
+
+      // Center the selected date button
+      setTimeout(() => {
+        const selectedButton = document.querySelector(`[data-date="${todayOrNext}"]`);
+        if (selectedButton && dateScrollRef.current) {
+          const scrollContainer = dateScrollRef.current;
+          const buttonRect = (selectedButton as HTMLElement).getBoundingClientRect();
+          const containerRect = scrollContainer.getBoundingClientRect();
+          const scrollLeft = (selectedButton as HTMLElement).offsetLeft - (containerRect.width / 2) + (buttonRect.width / 2);
+          scrollContainer.scrollLeft = scrollLeft;
+        }
+      }, 100);
+    }
+  }, [processedEventsData, selectedDate]);
 
   return (
     <div className="w-full h-screen flex flex-col">
       <div className="flex-1 flex flex-row">
         {/* Events sidebar */}
-        <div className="w-1/4 bg-orange-200 p-4 overflow-y-auto">
-          <div className='text-4xl text-black'>Sinulog 2025</div>
-          <div className='text-xl text-black'>Once Beat, One Dance, One Vision</div>
+        <div className="w-1/4 bg-white p-4 overflow-y-auto">
+          {/* Logo */}
+          <div className="flex justify-start mb-4">
+            <Image
+              src="/logo.png"
+              alt="Sinulog Logo"
+              width={200}
+              height={100}
+              priority
+            />
+          </div>
           
-          {/* Search input with button */}
+          {/* Subtitle */}
+          <div className='text-xl text-black mb-4'>Once Beat, One Dance, One Vision</div>
+          
+          {/* Updated search input with new handler */}
           <div className="mt-4 mb-4">
             <div className="flex gap-2">
               <input
                 type="text"
                 placeholder="Search events..."
                 value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
+                onChange={handleSearchInputChange}
                 onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
                 className="flex-1 p-2 rounded-lg border border-orange-300 focus:outline-none focus:ring-2 focus:ring-orange-400 text-black"
               />
               <button
                 onClick={handleSearch}
-                className="px-4 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                disabled={!searchQuery.trim()}
+                className={`px-4 py-2 rounded-lg transition-colors ${
+                  searchQuery.trim() 
+                    ? 'bg-orange-500 text-white hover:bg-orange-600' 
+                    : 'bg-gray-300 text-gray-500 cursor-not-allowed'
+                }`}
               >
                 Search
               </button>
