@@ -7,10 +7,6 @@ interface Event {
   [key: string]: string | string[];
 }
 
-interface EventsByDate {
-  [key: string]: Event;
-}
-
 export default function Home() {
   const [selectedDate, setSelectedDate] = useState<string>('');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -117,14 +113,12 @@ export default function Home() {
   const handleEventClick = (location: string | string[]) => {
     // Handle array case
     if (Array.isArray(location)) {
-      location = location[0]; // Take the first location string from the array
+      location = location[0];
     }
 
     const locationString = location.replace(/[\[\]]/g, '').split(', ');
-    // Remove the time from the first element
     locationString.shift();
     
-    // Rest of the function remains the same
     const locations = locationString
       .join(', ')
       .split(' & ')
@@ -149,23 +143,6 @@ export default function Home() {
   const defaultCenter = {
     lat: 10.3157,
     lng: 123.8854
-  };
-
-  const hasValidLocation = (details: string | string[]) => {
-    // Handle array case
-    if (Array.isArray(details)) {
-      details = details[0]; // Take the first location string from the array
-    }
-
-    const locationString = details.replace(/[\[\]]/g, '').split(', ');
-    locationString.shift(); // Remove time
-    
-    const locations = locationString
-      .join(', ')
-      .split(' & ')
-      .map(loc => loc.trim());
-
-    return locations.some(loc => locationCoords[loc]);
   };
 
   // Add this helper function to safely parse location details
@@ -234,11 +211,6 @@ export default function Home() {
     setProcessedEventsData(processed);
     
     const today = new Date();
-    const todayStr = today.toLocaleDateString('en-US', {
-      month: 'long',
-      day: 'numeric',
-      year: 'numeric'
-    }).toLowerCase();
     
     const allDates = Object.keys(processed).sort((a, b) => 
       new Date(a).getTime() - new Date(b).getTime()
@@ -257,11 +229,11 @@ export default function Home() {
         const scrollContainer = dateScrollRef.current;
         const buttonRect = (selectedButton as HTMLElement).getBoundingClientRect();
         const containerRect = scrollContainer.getBoundingClientRect();
-        const scrollLeft = button.offsetLeft - (containerRect.width / 2) + (buttonRect.width / 2);
+        const scrollLeft = (selectedButton as HTMLElement).offsetLeft - (containerRect.width / 2) + (buttonRect.width / 2);
         scrollContainer.scrollLeft = scrollLeft;
       }
     }, 100);
-  }, []);
+  }, [processEventsData]);
 
   return (
     <div className="w-full h-screen flex flex-col">
@@ -370,13 +342,13 @@ export default function Home() {
               : [eventData[0], eventData[1], selectedDate];
             
             const { time, locations } = parseLocationDetails(details);
-            const hasLocation = locations.some(loc => locationCoords[loc]);
             const formattedDetails = formatEventDetails(details);
             
             return (
               <div
                 key={`${date}-${event}`}
                 className="p-3 bg-white rounded-lg mb-3 hover:bg-orange-100 text-black transition-colors relative"
+                onClick={() => handleEventClick(details)}
               >
                 {isSearching && (
                   <div className="text-xs text-orange-600 mb-1">
@@ -390,7 +362,7 @@ export default function Home() {
                 <p className="text-sm text-gray-600 mb-3">{formattedDetails}</p>
                 
                 <div className="flex gap-2 mt-2">
-                  {hasLocation && (
+                  {locations.some(loc => locationCoords[loc]) && (
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -411,12 +383,6 @@ export default function Home() {
                     Add to Calendar
                   </button>
                 </div>
-                
-                {!hasLocation && (
-                  <span className="absolute top-2 right-2 text-yellow-500 text-xs" title="Location not mapped">
-                    ⚠️ Not Found
-                  </span>
-                )}
               </div>
             );
           })}
